@@ -35,7 +35,15 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen name="../gesture" options={{ title: 'Gesture' }} />
+      <Tabs.Screen
+        name="../gesture"
+        options={{
+          title: 'Recorder',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="hand.raised.fill" color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

@@ -1,19 +1,17 @@
-// app/gesture.tsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, type ComponentProps } from 'react';
 import {
-  SafeAreaView,
-  View,
-  Text,
-  Button,
-  TextInput,
-  StyleSheet,
-  FlatList,
   Alert,
   Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Accelerometer, Gyroscope } from 'expo-sensors';
 import * as FileSystem from 'expo-file-system';
-// legacy read/write for Expo Go compatibility
 import {
   writeAsStringAsync as legacyWriteAsStringAsync,
   readAsStringAsync as legacyReadAsStringAsync,
@@ -22,6 +20,9 @@ import * as Sharing from 'expo-sharing';
 import * as Linking from 'expo-linking';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
+import { Feather } from '@expo/vector-icons';
+
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 /** Types */
 type Sample = {
@@ -35,9 +36,42 @@ type Sample = {
 };
 type Templates = { [label: string]: Sample[][] };
 
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type FeatherIcon = ComponentProps<typeof Feather>['name'];
+
+const palette = {
+  light: {
+    background: '#F5F7FB',
+    card: '#FFFFFF',
+    border: '#E2E8F0',
+    muted: '#636A7A',
+    accent: '#2563EB',
+    secondary: '#EEF2FF',
+    danger: '#DC2626',
+    badgeBg: '#DBEAFE',
+    badgeText: '#1D4ED8',
+    textStrong: '#0F172A',
+    field: '#F8FAFF',
+  },
+  dark: {
+    background: '#020817',
+    card: '#0B1221',
+    border: '#1D2840',
+    muted: '#94A3B8',
+    accent: '#3B82F6',
+    secondary: '#14223B',
+    danger: '#F87171',
+    badgeBg: '#0F1E38',
+    badgeText: '#BFDBFE',
+    textStrong: '#F9FAFB',
+    field: '#050B18',
+  },
+} as const;
+
 export default function GestureScreen() {
   const [recording, setRecording] = useState(false);
   const [count, setCount] = useState(0);
+  const countRef = useRef(0);
   const accelSub = useRef<any>(null);
   const gyroSub = useRef<any>(null);
   const lastGyro = useRef({ x: 0, y: 0, z: 0 });
@@ -51,6 +85,9 @@ export default function GestureScreen() {
       { meanIntra: number; maxIntra: number; exemplarCount: number }
     >
   >({});
+  const colorScheme = useColorScheme() ?? 'light';
+  const colors = palette[colorScheme];
+  const templateEntries = Object.keys(templates);
 
   useEffect(() => {
     Accelerometer.setUpdateInterval(40);
@@ -58,8 +95,22 @@ export default function GestureScreen() {
     return () => stopSensors();
   }, []);
 
+  // Throttle UI updates for sample count to keep buttons responsive
+  useEffect(() => {
+    let id: any;
+    if (recording) {
+      id = setInterval(() => setCount(countRef.current), 200);
+    } else {
+      // ensure the last count is reflected when stopping
+      setCount(countRef.current);
+    }
+    return () => id && clearInterval(id);
+  }, [recording]);
+
   function startSensors() {
+    if (accelSub.current || gyroSub.current) return; // avoid stacking listeners
     bufferRef.current = [];
+    countRef.current = 0;
     setCount(0);
     setRecording(true);
     setStatus('recording...');
@@ -76,17 +127,20 @@ export default function GestureScreen() {
         gz: g.z,
       };
       bufferRef.current.push(s);
-      setCount((c) => c + 1);
+      countRef.current += 1;
     });
   }
 
   function stopSensors() {
+    // Flip UI state first for instant feedback
+    setRecording(false);
+    setStatus('idle');
+    setCount(countRef.current);
+    // Then tear down listeners
     accelSub.current && accelSub.current.remove();
     gyroSub.current && gyroSub.current.remove();
     accelSub.current = null;
     gyroSub.current = null;
-    setRecording(false);
-    setStatus('idle');
   }
 
   function saveExample() {
@@ -400,6 +454,24 @@ export default function GestureScreen() {
         if (await Linking.canOpenURL(url)) return Linking.openURL(url);
         return Linking.openURL('https://www.youtube.com');
       }
+      // X (Twitter)
+      if (l === 'x' || l.includes('twitter')) {
+        const url = 'twitter://timeline';
+        if (await Linking.canOpenURL(url)) return Linking.openURL(url);
+        return Linking.openURL('https://x.com');
+      }
+      // Gmail (compose)
+      if (l.includes('gmail') || l.includes('email')) {
+        const gmailCompose = 'googlegmail://co';
+        if (await Linking.canOpenURL(gmailCompose))
+          return Linking.openURL(gmailCompose);
+        // Fallback to default email app compose
+        return Linking.openURL('mailto:');
+      }
+      // Amazon (home/search). Use universal link so app opens if installed
+      if (l.includes('amazon')) {
+        return Linking.openURL('https://www.amazon.com');
+      }
       if (l.includes('web') || l.includes('google') || l.includes('browser')) {
         return Linking.openURL('https://www.google.com');
       }
@@ -414,61 +486,329 @@ export default function GestureScreen() {
     setLabelStats({});
   }
 
+  const ActionButton = ({
+    label,
+    icon,
+    variant = 'primary',
+    onPress,
+    disabled,
+    fullWidth,
+  }: {
+    label: string;
+    icon?: FeatherIcon;
+    variant?: ButtonVariant;
+    onPress: () => void;
+    disabled?: boolean;
+    fullWidth?: boolean;
+  }) => {
+    const variantStyle = {
+      primary: { backgroundColor: colors.accent, borderColor: colors.accent },
+      secondary: {
+        backgroundColor: colors.secondary,
+        borderColor: colors.border,
+      },
+      ghost: { backgroundColor: 'transparent', borderColor: colors.border },
+      danger: { backgroundColor: colors.danger, borderColor: colors.danger },
+    }[variant];
+
+    const textColor = (() => {
+      if (variant === 'secondary') return colors.textStrong;
+      if (variant === 'ghost') return colors.accent;
+      return '#F8FAFF';
+    })();
+
+    return (
+      <TouchableOpacity
+        activeOpacity={0.85}
+        disabled={disabled}
+        onPress={onPress}
+        pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        style={[
+          styles.buttonBase,
+          variantStyle,
+          fullWidth && styles.buttonFullWidth,
+          disabled && styles.buttonDisabled,
+        ]}
+      >
+        <View style={styles.buttonContent}>
+          {icon && <Feather name={icon} size={16} color={textColor} />}
+          <Text style={[styles.buttonLabel, { color: textColor }]}>
+            {label}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Air Gesture Launcher</Text>
-      <View style={styles.row}>
-        <Button
-          title={recording ? 'Stop Recording' : 'Start Recording'}
-          onPress={recording ? stopSensors : startSensors}
-        />
-        <Text style={styles.counter}>{count} samples</Text>
-      </View>
-      <View style={{ marginTop: 12, width: '100%', alignItems: 'center' }}>
-        <TextInput
-          placeholder="Label name (e.g., maps, whatsapp)"
-          value={labelName}
-          onChangeText={setLabelName}
-          style={styles.input}
-        />
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-          <Button title="Save example" onPress={saveExample} />
-          <Button title="Export" onPress={exportTemplates} />
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-          <Button
-            title="Import JSON (file)"
-            onPress={importTemplatesFromFile}
-          />
-          <Button title="Import from clipboard" onPress={importFromClipboard} />
-        </View>
-      </View>
-      <View style={{ marginTop: 12, width: '100%', alignItems: 'center' }}>
-        <Button
-          title="Start then Stop & Classify"
-          onPress={() => {
-            if (!recording) startSensors();
-            else stopAndClassify();
-          }}
-        />
-      </View>
-      <View style={{ marginTop: 16, width: '100%' }}>
-        <Text style={{ fontWeight: '600' }}>Saved templates:</Text>
-        <FlatList
-          data={Object.keys(templates)}
-          keyExtractor={(k) => k}
-          renderItem={({ item }) => (
-            <View style={styles.templateRow}>
-              <Text>
-                {item} — {templates[item].length} examples
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          style={[
+            styles.card,
+            styles.heroCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.heroHeader}>
+            <Text style={[styles.heroTitle, { color: colors.textStrong }]}>
+              Air Gesture Recorder
+            </Text>
+            <View style={[styles.badge, { backgroundColor: colors.badgeBg }]}>
+              <Feather name="rss" size={14} color={colors.badgeText} />
+              <Text style={[styles.badgeText, { color: colors.badgeText }]}>
+                {status}
               </Text>
             </View>
+          </View>
+          <Text style={[styles.heroCopy, { color: colors.muted }]}>
+            Capture sensor sequences, label them with the automation you want to
+            run, then export the entire library as JSON.
+          </Text>
+          <View style={styles.metricsRow}>
+            {[
+              {
+                label: 'Samples',
+                value: String(count),
+                caption: 'current buffer',
+              },
+              {
+                label: 'Templates',
+                value: String(templateEntries.length),
+                caption: 'labels saved',
+              },
+              {
+                label: 'Recorder',
+                value: recording ? 'Live' : 'Idle',
+                caption: status,
+              },
+            ].map((metric) => (
+              <View
+                key={metric.label}
+                style={[styles.metricCard, { borderColor: colors.border }]}
+              >
+                <Text
+                  style={[styles.metricValue, { color: colors.textStrong }]}
+                >
+                  {metric.value}
+                </Text>
+                <Text style={[styles.metricLabel, { color: colors.muted }]}>
+                  {metric.label}
+                </Text>
+                <Text style={[styles.metricCaption, { color: colors.muted }]}>
+                  {metric.caption}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.heroActions}>
+            <ActionButton
+              label={recording ? 'Stop capture' : 'Start capture'}
+              icon={recording ? 'pause-circle' : 'play-circle'}
+              onPress={recording ? stopSensors : startSensors}
+            />
+            <ActionButton
+              label={recording ? 'Stop & classify' : 'Start then classify'}
+              icon={recording ? 'check-circle' : 'repeat'}
+              variant="ghost"
+              onPress={() => {
+                if (!recording) startSensors();
+                else stopAndClassify();
+              }}
+            />
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.textStrong }]}>
+            Label composer
+          </Text>
+          <Text style={[styles.sectionCopy, { color: colors.muted }]}>
+            Name gestures after the action they unlock. Keep it human: maps,
+            studio lights, reply.
+          </Text>
+          <TextInput
+            placeholder="Label name (e.g., maps, x, gmail)"
+            placeholderTextColor={colors.muted}
+            value={labelName}
+            onChangeText={setLabelName}
+            autoCapitalize="none"
+            style={[
+              styles.input,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.field,
+                color: colors.textStrong,
+              },
+            ]}
+          />
+          <ActionButton
+            label="Save exemplar"
+            icon="save"
+            variant="secondary"
+            onPress={saveExample}
+          />
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.textStrong }]}>
+            Data studio
+          </Text>
+          <Text style={[styles.sectionCopy, { color: colors.muted }]}>
+            Sync your library with the outside world. Export before
+            reinstalling, import to stay aligned across devices.
+          </Text>
+          <View style={styles.toolGrid}>
+            <ActionButton
+              label="Export JSON"
+              icon="upload"
+              variant="ghost"
+              fullWidth
+              onPress={exportTemplates}
+            />
+            <ActionButton
+              label="Import file"
+              icon="download"
+              variant="ghost"
+              fullWidth
+              onPress={importTemplatesFromFile}
+            />
+            <ActionButton
+              label="Paste JSON"
+              icon="clipboard"
+              variant="ghost"
+              fullWidth
+              onPress={importFromClipboard}
+            />
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.libraryHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.textStrong }]}>
+              Gesture library
+            </Text>
+            <View style={[styles.badge, { backgroundColor: colors.badgeBg }]}>
+              <Feather name="layers" size={14} color={colors.badgeText} />
+              <Text style={[styles.badgeText, { color: colors.badgeText }]}>
+                {templateEntries.length} labels
+              </Text>
+            </View>
+          </View>
+          {templateEntries.length ? (
+            <View style={styles.libraryList}>
+              {templateEntries.map((label) => {
+                const stats = labelStats[label];
+                return (
+                  <View
+                    key={label}
+                    style={[
+                      styles.templateCard,
+                      { borderColor: colors.border },
+                    ]}
+                  >
+                    <View style={styles.templateHeader}>
+                      <Text
+                        style={[
+                          styles.templateTitle,
+                          { color: colors.textStrong },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                      <Text
+                        style={[styles.templateBadge, { color: colors.muted }]}
+                      >
+                        {templates[label].length} examples
+                      </Text>
+                    </View>
+                    {stats ? (
+                      <View style={styles.templateStatsRow}>
+                        <View style={styles.templateStat}>
+                          <Text
+                            style={[styles.statLabel, { color: colors.muted }]}
+                          >
+                            mean intra
+                          </Text>
+                          <Text
+                            style={[
+                              styles.statValue,
+                              { color: colors.textStrong },
+                            ]}
+                          >
+                            {stats.meanIntra.toFixed(3)}
+                          </Text>
+                        </View>
+                        <View style={styles.templateStat}>
+                          <Text
+                            style={[styles.statLabel, { color: colors.muted }]}
+                          >
+                            max intra
+                          </Text>
+                          <Text
+                            style={[
+                              styles.statValue,
+                              { color: colors.textStrong },
+                            ]}
+                          >
+                            {stats.maxIntra.toFixed(3)}
+                          </Text>
+                        </View>
+                        <View style={styles.templateStat}>
+                          <Text
+                            style={[styles.statLabel, { color: colors.muted }]}
+                          >
+                            samples
+                          </Text>
+                          <Text
+                            style={[
+                              styles.statValue,
+                              { color: colors.textStrong },
+                            ]}
+                          >
+                            {stats.exemplarCount}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : (
+                      <Text style={[styles.statLabel, { color: colors.muted }]}>
+                        Add at least two exemplars to unlock stats.
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <Text style={[styles.emptyState, { color: colors.muted }]}>
+              No templates saved yet. Capture a gesture, give it a label, and it
+              will show up here.
+            </Text>
           )}
-          ListEmptyComponent={<Text>No templates saved yet.</Text>}
-        />
-        <View style={{ marginTop: 8 }}>
-          <Button
-            title="Clear templates"
+          <ActionButton
+            label="Clear library"
+            icon="trash-2"
+            variant="danger"
+            fullWidth
             onPress={() => {
               Alert.alert(
                 'Clear templates?',
@@ -479,26 +819,186 @@ export default function GestureScreen() {
                 ]
               );
             }}
+            disabled={!templateEntries.length}
           />
         </View>
-      </View>
-      <Text style={{ marginTop: 12, color: '#666' }}>Status: {status}</Text>
+
+        <Text style={[styles.footerStatus, { color: colors.muted }]}>
+          Status: {status}
+        </Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 18, alignItems: 'center' },
-  title: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
-  row: { flexDirection: 'row', alignItems: 'center' },
-  counter: { marginLeft: 12 },
-  input: {
-    width: 340,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 8,
-    borderRadius: 6,
-    marginTop: 6,
+  safe: {
+    flex: 1,
   },
-  templateRow: { paddingVertical: 6 },
+  scrollContent: {
+    padding: 18,
+    gap: 18,
+  },
+  card: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 20,
+    gap: 16,
+  },
+  heroCard: {
+    gap: 20,
+  },
+  heroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  heroTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  badgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  heroCopy: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  metricCard: {
+    flex: 1,
+    minWidth: 110,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    gap: 4,
+  },
+  metricValue: {
+    fontSize: 22,
+    fontWeight: '600',
+  },
+  metricLabel: {
+    textTransform: 'uppercase',
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  metricCaption: {
+    fontSize: 12,
+  },
+  heroActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  sectionCopy: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  toolGrid: {
+    gap: 10,
+  },
+  libraryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  libraryList: {
+    gap: 12,
+  },
+  templateCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    gap: 12,
+  },
+  templateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  templateTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  templateBadge: {
+    fontSize: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  templateStatsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  templateStat: {
+    flex: 1,
+    minWidth: 90,
+    gap: 2,
+  },
+  statLabel: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  emptyState: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  footerStatus: {
+    textAlign: 'center',
+    marginBottom: 32,
+    fontSize: 13,
+  },
+  buttonBase: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  buttonContent: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  buttonLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  buttonFullWidth: {
+    width: '100%',
+  },
+  buttonDisabled: {
+    opacity: 0.45,
+  },
 });

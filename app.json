@@ -9,9 +9,14 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Allow gesAir to listen briefly to recognize songs and play them in Spotify."
+      }
     },
     "android": {
+      "package": "com.gesair.launcher",
+      "permissions": ["RECORD_AUDIO"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -38,8 +43,20 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "./plugins/with-android-float-service.js",
+      "./plugins/with-acrcloud-native.js"
     ],
+    "extra": {
+      "AUDD_API_TOKEN": "",
+      "ACR_HOST": "",
+      "ACR_ACCESS_KEY": "",
+      "ACR_ACCESS_SECRET": "",
+      "ACR_PROXY_URL": "",
+      "ACR_BEARER": ""
+      ,
+      "ACOUSTID_PROXY_URL": ""
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
