@@ -86,10 +86,21 @@ export default function ExploreScreen() {
               <Text style={[styles.secondaryButtonText, { color: accent }]}>Float between apps</Text>
             </Pressable>
           </Link>
-          <Link href="/song" asChild>
+          <Link href="/optimize" asChild>
             <Pressable style={[styles.secondaryButton, { borderColor: accent }]}> 
-              <Feather name="music" color={accent} size={18} />
-              <Text style={[styles.secondaryButtonText, { color: accent }]}>Find & play song</Text>
+              <Feather name="cpu" color={accent} size={18} />
+              <Text style={[styles.secondaryButtonText, { color: accent }]}>Optimize</Text>
+            </Pressable>
+          </Link>
+        </View>
+
+        <View style={[styles.optimizeCard, { borderColor: palette.border, backgroundColor: palette.card }]}> 
+          <ThemedText type="subtitle">Optimize background usage</ThemedText>
+          <ThemedText style={[styles.optimizeCopy, { color: palette.muted }]}>See which apps stay active in the background and get notified when it is time to close them.</ThemedText>
+          <Link href="/optimize" asChild>
+            <Pressable style={[styles.primaryButton, { backgroundColor: accent, alignSelf: 'flex-start' }]}> 
+              <Feather name="activity" color="#F8FAFF" size={18} />
+              <Text style={styles.primaryButtonText}>Open optimize</Text>
             </Pressable>
           </Link>
         </View>
@@ -236,5 +247,16 @@ const styles = StyleSheet.create({
   },
   resourceCaption: {
     fontSize: 14,
+  },
+  optimizeCard: {
+    marginTop: 12,
+    padding: 20,
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 10,
+  },
+  optimizeCopy: {
+    fontSize: 14,
+    lineHeight: 22,
   },
 });
