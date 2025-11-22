@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, type ComponentProps } from 'react';
 import {
   Alert,
-  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -17,12 +16,12 @@ import {
   readAsStringAsync as legacyReadAsStringAsync,
 } from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import * as Linking from 'expo-linking';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
 import { Feather } from '@expo/vector-icons';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { openAppForLabel } from '@/modules/label-actions';
 
 /** Types */
 type Sample = {
@@ -430,57 +429,13 @@ export default function GestureScreen() {
     ];
     if (bestMin < adaptiveThreshold) {
       Alert.alert('Recognized', msgLines.join('\n'));
-      handleActionForLabel(res.label);
+      openAppForLabel(res.label);
     } else {
       Alert.alert('Not confident', msgLines.join('\n'));
     }
   }
 
   /** Map labels to actions */
-  async function handleActionForLabel(label: string) {
-    try {
-      const l = label.toLowerCase();
-      if (l.includes('whatsapp')) {
-        const url = 'whatsapp://send?text=Hello';
-        if (await Linking.canOpenURL(url)) return Linking.openURL(url);
-      }
-      if (l.includes('maps') || l === 'm') {
-        const url =
-          Platform.OS === 'ios' ? 'maps://?q=coffee' : 'geo:0,0?q=coffee';
-        return Linking.openURL(url);
-      }
-      if (l.includes('youtube')) {
-        const url = 'vnd.youtube://';
-        if (await Linking.canOpenURL(url)) return Linking.openURL(url);
-        return Linking.openURL('https://www.youtube.com');
-      }
-      // X (Twitter)
-      if (l === 'x' || l.includes('twitter')) {
-        const url = 'twitter://timeline';
-        if (await Linking.canOpenURL(url)) return Linking.openURL(url);
-        return Linking.openURL('https://x.com');
-      }
-      // Gmail (compose)
-      if (l.includes('gmail') || l.includes('email')) {
-        const gmailCompose = 'googlegmail://co';
-        if (await Linking.canOpenURL(gmailCompose))
-          return Linking.openURL(gmailCompose);
-        // Fallback to default email app compose
-        return Linking.openURL('mailto:');
-      }
-      // Amazon (home/search). Use universal link so app opens if installed
-      if (l.includes('amazon')) {
-        return Linking.openURL('https://www.amazon.com');
-      }
-      if (l.includes('web') || l.includes('google') || l.includes('browser')) {
-        return Linking.openURL('https://www.google.com');
-      }
-      Alert.alert('Action', `No action mapped for "${label}".`);
-    } catch (err: any) {
-      Alert.alert('Open failed', err?.message ?? String(err));
-    }
-  }
-
   function clearTemplates() {
     setTemplates({});
     setLabelStats({});

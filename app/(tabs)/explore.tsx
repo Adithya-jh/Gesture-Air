@@ -51,6 +51,12 @@ const resourceLinks = [
     caption: 'Live capture, labeling, importing',
   },
   {
+    title: 'ML launcher',
+    href: '/ml',
+    icon: 'activity' as const,
+    caption: 'Collect IMU data, train, deploy',
+  },
+  {
     title: 'Project README',
     href: '/modal',
     icon: 'book-open' as const,
@@ -78,6 +84,12 @@ export default function ExploreScreen() {
             <Pressable style={[styles.primaryButton, { backgroundColor: accent }]}> 
               <Feather name="play-circle" color="#F8FAFF" size={18} />
               <Text style={styles.primaryButtonText}>Open recorder</Text>
+            </Pressable>
+          </Link>
+          <Link href="/ml" asChild>
+            <Pressable style={[styles.secondaryButton, { borderColor: accent }]}> 
+              <Feather name="cpu" color={accent} size={18} />
+              <Text style={[styles.secondaryButtonText, { color: accent }]}>Open ML launcher</Text>
             </Pressable>
           </Link>
           <Link href="/float" asChild>

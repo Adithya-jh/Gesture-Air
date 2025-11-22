@@ -44,6 +44,15 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="../ml"
+        options={{
+          title: 'ML',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="brain.head.profile" color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

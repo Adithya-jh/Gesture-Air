@@ -1,52 +1,46 @@
-# Welcome to your Expo app 👋
+# Gesture Air Launcher
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+An Expo Router workspace for capturing mid-air gestures and mapping them to app launches. Two experiences ship side-by-side:
 
-## Get started
+- **Recorder** (`/gesture` tab): collect DTW-friendly templates, inspect intra-gesture drift, and quickly reroute gestures to deeplinks.
+- **ML Launcher** (`/ml` tab): capture raw IMU bursts, extract statistical feature vectors, train a softmax model, and open apps purely from predictions.
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Getting started
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Open the project inside Expo Go, an emulator, or a development build.
 
-## Learn more
+## ML workflow
 
-To learn more about developing your project with Expo, look at the following resources:
+1. Navigate to the **ML** tab (or use the "Open ML launcher" CTA in Explore).
+2. For each label (maps, whatsapp, etc.) record gestures and tap **Save to dataset**. Aim for 10–20 samples per label.
+3. Use the dataset card to export `gesture_ml_dataset.json`. You can share it via AirDrop, Files, or copy it to your clipboard.
+4. Train a model locally:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+   ```bash
+   npm run train:ml -- gesture_ml_dataset.json gesture_ml_model.json --epochs=400 --lr=0.06
+   ```
 
-## Join the community
+   The script reads the dataset, trains the shared softmax model, and writes a drop-in `gesture_ml_model.json` file.
+5. Import the model inside the ML tab and tap **Predict & open app** after recording a fresh gesture. When the model is >55% confident it opens the mapped app using the same routing table as the legacy recorder.
 
-Join our community of developers creating universal apps.
+You can also train directly on-device via the **Train model** button, which runs the same helper as the CLI script.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Project scripts
 
-<!-- android/app/build/outputs/apk/debug/app-debug.apk -->
+- `npm run start` – boot Expo.
+- `npm run lint` – Expo lint rules.
+- `npm run train:ml -- <dataset.json> [output.json] [--epochs=400] [--lr=0.05]` – train the ML model from any exported dataset JSON.
+
+## Files to know
+
+- `app/gesture.tsx` – template recorder / DTW launcher.
+- `app/ml.tsx` – ML-first launcher with dataset management, training, and prediction tools.
+- `modules/gesture-ml.ts` – feature extraction + softmax training helpers shared by the app and CLI script.
+- `scripts/train-gesture-model.ts` – CLI entry for training models on your laptop.
+
+Grab the `android/app/build/outputs/apk/debug/app-debug.apk` artifact when you need to sideload quickly.

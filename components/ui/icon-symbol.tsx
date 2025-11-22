@@ -19,6 +19,7 @@ const MAPPING = {
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
   'hand.raised.fill': 'pan-tool',
+  'brain.head.profile': 'memory',
 } as IconMapping;
 
 /**
