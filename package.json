@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "train:ml": "tsx scripts/train-gesture-model.ts"
+    "train:ml": "tsx scripts/train-gesture-model.ts",
+    "eval:ml": "tsx scripts/eval-gesture-model.ts"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

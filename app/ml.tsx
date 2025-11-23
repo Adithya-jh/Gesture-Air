@@ -30,6 +30,7 @@ import {
   movingAverage,
   predictFromModel,
   trainSoftmaxModel,
+  evaluateSoftmaxOnDataset,
 } from '@/modules/gesture-ml';
 
 type FeatherIcon = ComponentProps<typeof Feather>['name'];
@@ -65,6 +66,14 @@ const palette = {
 
 const initialDataset: GestureDataset = { featureNames: [], entries: [] };
 
+function getRuntimeDatasetPath() {
+  const docDirRuntime = (FileSystem as any).documentDirectory;
+  const cacheDirRuntime = (FileSystem as any).cacheDirectory;
+  const dir = docDirRuntime ?? cacheDirRuntime ?? null;
+  if (!dir) return null;
+  return `${dir}gesture_ml_dataset.runtime.json`;
+}
+
 export default function MLGestureScreen() {
   const [recording, setRecording] = useState(false);
   const [count, setCount] = useState(0);
@@ -75,6 +84,7 @@ export default function MLGestureScreen() {
   const bufferRef = useRef<SensorSample[]>([]);
   const [labelName, setLabelName] = useState('');
   const [dataset, setDataset] = useState<GestureDataset>(initialDataset);
+  const [dtwTemplates, setDtwTemplates] = useState<Record<string, SensorSample[][]>>({});
   const [model, setModel] = useState<GestureModel | null>(null);
   const [training, setTraining] = useState(false);
   const [status, setStatus] = useState('idle');
@@ -84,6 +94,22 @@ export default function MLGestureScreen() {
   useEffect(() => {
     Accelerometer.setUpdateInterval(40);
     Gyroscope.setUpdateInterval(40);
+    // Hydrate dataset from disk if available
+    (async () => {
+      const path = getRuntimeDatasetPath();
+      if (!path) return;
+      try {
+        const info = await FileSystem.getInfoAsync(path);
+        if (!info.exists) return;
+        const text = await legacyReadAsStringAsync(path);
+        const parsed = JSON.parse(text) as GestureDataset;
+        if (parsed && Array.isArray(parsed.entries)) {
+          setDataset(parsed);
+        }
+      } catch {
+        // ignore hydration errors and start fresh
+      }
+    })();
     return () => stopSensors();
   }, []);
 
@@ -96,6 +122,20 @@ export default function MLGestureScreen() {
     }
     return () => id && clearInterval(id);
   }, [recording]);
+
+  // Persist dataset so it survives navigation / reloads until explicitly cleared.
+  useEffect(() => {
+    const path = getRuntimeDatasetPath();
+    if (!path) return;
+    (async () => {
+      try {
+        const json = JSON.stringify(dataset);
+        await legacyWriteAsStringAsync(path, json);
+      } catch {
+        // best-effort; ignore persistence errors
+      }
+    })();
+  }, [dataset]);
 
   const labelSummary = useMemo(() => {
     const stats: Record<
@@ -161,6 +201,62 @@ export default function MLGestureScreen() {
     setCount(0);
   }
 
+  // DTW helpers reuse the same axes as the recorder screen.
+  function normalizeSequenceDtw(seq: SensorSample[]) {
+    if (!seq.length) return seq;
+    const axes = ['ax', 'ay', 'az', 'gx', 'gy', 'gz'] as const;
+    const stats: Record<string, { mean: number; std: number }> = {};
+    axes.forEach((k) => {
+      const vals = seq.map((s) => (s as any)[k] as number);
+      const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+      const variance =
+        vals.map((v) => (v - mean) ** 2).reduce((a, b) => a + b, 0) /
+        Math.max(1, vals.length);
+      let std = Math.sqrt(variance);
+      if (std === 0) std = 1;
+      stats[k] = { mean, std };
+    });
+    return seq.map((s) => {
+      const out: any = {};
+      axes.forEach((k) => {
+        out[k] = ((s as any)[k] - stats[k].mean) / stats[k].std;
+      });
+      return out as SensorSample;
+    });
+  }
+
+  function sampleDistanceDtw(a: SensorSample, b: SensorSample) {
+    const keys: (keyof SensorSample)[] = ['ax', 'ay', 'az', 'gx', 'gy', 'gz'];
+    let sum = 0;
+    keys.forEach((k) => {
+      const da = (a as any)[k] || 0;
+      const db = (b as any)[k] || 0;
+      const d = da - db;
+      sum += d * d;
+    });
+    return Math.sqrt(sum);
+  }
+
+  function dtwDistance(seqA: SensorSample[], seqB: SensorSample[]) {
+    const n = seqA.length;
+    const m = seqB.length;
+    if (n === 0 || m === 0) return Number.POSITIVE_INFINITY;
+    const A = normalizeSequenceDtw(seqA);
+    const B = normalizeSequenceDtw(seqB);
+    const dtw: number[][] = Array.from({ length: n + 1 }, () =>
+      new Array(m + 1).fill(Infinity)
+    );
+    dtw[0][0] = 0;
+    for (let i = 1; i <= n; i++) {
+      for (let j = 1; j <= m; j++) {
+        const cost = sampleDistanceDtw(A[i - 1], B[j - 1]);
+        const minPrev = Math.min(dtw[i - 1][j], dtw[i][j - 1], dtw[i - 1][j - 1]);
+        dtw[i][j] = cost + minPrev;
+      }
+    }
+    return dtw[n][m] / (n + m);
+  }
+
   function ensureFeatureLayout(incomingNames: string[]) {
     if (!dataset.featureNames.length) return incomingNames;
     const matches =
@@ -198,6 +294,13 @@ export default function MLGestureScreen() {
         featureNames: prev.featureNames.length ? prev.featureNames : features.featureNames,
         entries: [...prev.entries, entry],
       }));
+      // Also track full filtered sequences per label for DTW baseline.
+      setDtwTemplates((prev) => {
+        const next = { ...prev };
+        if (!next[trimmed]) next[trimmed] = [];
+        next[trimmed].push(filtered);
+        return next;
+      });
       resetBuffer();
       Alert.alert('Saved', `Added training example for "${trimmed}".`);
     } catch (err: any) {
@@ -214,6 +317,7 @@ export default function MLGestureScreen() {
         onPress: () => {
           setDataset(initialDataset);
           setModel(null);
+          setDtwTemplates({});
         },
       },
     ]);
@@ -221,6 +325,33 @@ export default function MLGestureScreen() {
 
   function clearModel() {
     setModel(null);
+  }
+
+  function evaluateAccuracy() {
+    if (!dataset.entries.length) {
+      Alert.alert('Dataset empty', 'Collect samples before evaluating accuracy.');
+      return;
+    }
+    try {
+      const { result } = evaluateSoftmaxOnDataset(dataset, {
+        testFraction: 0.2,
+        epochs: 250,
+        learningRate: 0.08,
+      });
+      const overallPct = (result.overallAccuracy * 100).toFixed(1);
+      const lines = [
+        `Overall accuracy: ${overallPct}%`,
+        `Test samples: ${result.totalSamples}`,
+        '',
+        'Per-label:',
+        ...Object.entries(result.perLabel).map(([label, stats]) =>
+          `${label}: ${(stats.accuracy * 100).toFixed(1)}% (${stats.correct}/${stats.total})`
+        ),
+      ];
+      Alert.alert('Offline accuracy', lines.join('\n'));
+    } catch (err: any) {
+      Alert.alert('Evaluation failed', err?.message ?? String(err));
+    }
   }
 
   function trainModelOnDevice() {
@@ -253,18 +384,21 @@ export default function MLGestureScreen() {
       return;
     }
     try {
+      const t0 = Date.now();
       const filtered = movingAverage(bufferRef.current, 3);
       const features = extractFeatureVector(filtered);
       if (features.featureNames.length !== model.featureNames.length) {
         throw new Error('Model feature layout does not match current extraction.');
       }
       const prediction = predictFromModel(model, features.values);
+      const latencyMs = Date.now() - t0;
       resetBuffer();
       const top = prediction.distribution[0];
       const second = prediction.distribution[1];
       const summary = [
         `Prediction: ${top.label}`,
         `Confidence: ${(top.confidence * 100).toFixed(1)}%`,
+        `Latency: ${latencyMs} ms`,
         second ? `Runner-up: ${second.label} (${(second.confidence * 100).toFixed(1)}%)` : '',
       ]
         .filter(Boolean)
@@ -275,6 +409,56 @@ export default function MLGestureScreen() {
       }
     } catch (err: any) {
       Alert.alert('Prediction failed', err?.message ?? String(err));
+    }
+  }
+
+  function predictGestureBaseline() {
+    stopSensors();
+    if (!bufferRef.current.length) {
+      Alert.alert('No gesture', 'Record a gesture to classify.');
+      return;
+    }
+    if (!Object.keys(dtwTemplates).length) {
+      Alert.alert('No DTW templates', 'Save at least one example per label before running the baseline.');
+      return;
+    }
+    try {
+      const t0 = Date.now();
+      const filtered = movingAverage(bufferRef.current, 3);
+      // DTW baseline: compare this sequence against all stored sequences per label.
+      const labels = Object.keys(dtwTemplates);
+      const avgDistances: Record<string, number> = {};
+      labels.forEach((label) => {
+        const exemplars = dtwTemplates[label];
+        if (!exemplars || !exemplars.length) return;
+        const dists = exemplars.map((seq) => dtwDistance(filtered, seq));
+        const avg = dists.reduce((a, b) => a + b, 0) / dists.length;
+        avgDistances[label] = avg;
+      });
+      const entries = Object.entries(avgDistances);
+      if (!entries.length) {
+        throw new Error('No valid DTW exemplars to compare against.');
+      }
+      const weights = entries.map(([label, avg]) => ({ label, weight: Math.exp(-avg) }));
+      const total = weights.reduce((sum, w) => sum + w.weight, 0) || 1;
+      const distribution = weights
+        .map((w) => ({ label: w.label, confidence: w.weight / total }))
+        .sort((a, b) => b.confidence - a.confidence);
+      const top = distribution[0];
+      const second = distribution[1];
+      const latencyMs = Date.now() - t0;
+      resetBuffer();
+      const summary = [
+        `Baseline (DTW) prediction: ${top.label}`,
+        `Confidence (DTW-based): ${(top.confidence * 100).toFixed(1)}%`,
+        `Latency: ${latencyMs} ms`,
+        second ? `Runner-up: ${second.label} (${(second.confidence * 100).toFixed(1)}%)` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      Alert.alert('Baseline prediction', summary);
+    } catch (err: any) {
+      Alert.alert('Baseline failed', err?.message ?? String(err));
     }
   }
 
@@ -466,6 +650,14 @@ export default function MLGestureScreen() {
               onPress={predictGesture}
               fullWidth
             />
+            <ActionButton
+              label="Baseline (DTW) predict"
+              icon="trending-up"
+              variant="ghost"
+              disabled={!hasPendingGesture || !Object.keys(dtwTemplates).length}
+              onPress={predictGestureBaseline}
+              fullWidth
+            />
           </View>
         </View>
 
@@ -497,6 +689,13 @@ export default function MLGestureScreen() {
               await Clipboard.setStringAsync(JSON.stringify(dataset, null, 2));
               Alert.alert('Copied', 'Dataset JSON copied to clipboard.');
             }} />
+            <ActionButton
+              label="Evaluate accuracy"
+              icon="bar-chart-2"
+              variant="ghost"
+              disabled={!dataset.entries.length}
+              onPress={evaluateAccuracy}
+            />
             <ActionButton label="Clear dataset" icon="trash" variant="danger" onPress={clearDataset} />
           </View>
         </View>

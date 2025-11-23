@@ -205,6 +205,44 @@ export default function GestureScreen() {
     return out;
   }
 
+  function buildTemplatesFromMlDataset(raw: any): Templates {
+    if (!raw || !Array.isArray(raw.featureNames) || !Array.isArray(raw.entries)) {
+      throw new Error('JSON did not look like an ML dataset.');
+    }
+    const featureNames: string[] = raw.featureNames;
+    const entries: any[] = raw.entries;
+    const idx = (name: string) => featureNames.indexOf(name);
+    const idxAx = idx('accel_x_mean');
+    const idxAy = idx('accel_y_mean');
+    const idxAz = idx('accel_z_mean');
+    const idxGx = idx('gyro_x_mean');
+    const idxGy = idx('gyro_y_mean');
+    const idxGz = idx('gyro_z_mean');
+    if ([idxAx, idxAy, idxAz, idxGx, idxGy, idxGz].some((i) => i < 0)) {
+      throw new Error('ML dataset missing expected axis mean features.');
+    }
+    const out: Templates = {};
+    entries.forEach((entry) => {
+      if (!entry || typeof entry !== 'object') return;
+      const label = String(entry.label ?? '').trim();
+      const values: number[] = Array.isArray(entry.values) ? entry.values : [];
+      if (!label || !values.length) return;
+      const sample: Sample = {
+        t: 0,
+        ax: values[idxAx] ?? 0,
+        ay: values[idxAy] ?? 0,
+        az: values[idxAz] ?? 0,
+        gx: values[idxGx] ?? 0,
+        gy: values[idxGy] ?? 0,
+        gz: values[idxGz] ?? 0,
+      };
+      if (!out[label]) out[label] = [];
+      // Represent each ML feature vector as a single-sample DTW template.
+      out[label].push([sample]);
+    });
+    return out;
+  }
+
   /** Export templates */
   async function exportTemplates() {
     try {
@@ -247,12 +285,23 @@ export default function GestureScreen() {
       //@ts-ignore
       const text = await legacyReadAsStringAsync(res.uri);
       const parsed = JSON.parse(text);
-      setTemplates(parsed as Templates);
-      computeLabelStats(parsed);
-      Alert.alert(
-        'Imported',
-        `Loaded labels: ${Object.keys(parsed).join(', ')}`
-      );
+      let loaded: Templates;
+      // If this looks like an ML dataset (from the ML tab), convert it.
+      if (parsed && Array.isArray((parsed as any).featureNames) && Array.isArray((parsed as any).entries)) {
+        loaded = buildTemplatesFromMlDataset(parsed);
+        Alert.alert(
+          'Imported ML dataset',
+          `Converted ${Object.keys(loaded).length} labels into DTW templates.`
+        );
+      } else {
+        loaded = parsed as Templates;
+        Alert.alert(
+          'Imported',
+          `Loaded labels: ${Object.keys(loaded).join(', ')}`
+        );
+      }
+      setTemplates(loaded);
+      computeLabelStats(loaded);
     } catch (err: any) {
       Alert.alert('Import failed', err?.message ?? String(err));
     }
@@ -267,12 +316,22 @@ export default function GestureScreen() {
         return;
       }
       const parsed = JSON.parse(txt);
-      setTemplates(parsed as Templates);
-      computeLabelStats(parsed);
-      Alert.alert(
-        'Imported from clipboard',
-        `Labels: ${Object.keys(parsed).join(', ')}`
-      );
+      let loaded: Templates;
+      if (parsed && Array.isArray((parsed as any).featureNames) && Array.isArray((parsed as any).entries)) {
+        loaded = buildTemplatesFromMlDataset(parsed);
+        Alert.alert(
+          'Imported ML dataset',
+          `Converted ${Object.keys(loaded).length} labels into DTW templates.`
+        );
+      } else {
+        loaded = parsed as Templates;
+        Alert.alert(
+          'Imported from clipboard',
+          `Labels: ${Object.keys(loaded).join(', ')}`
+        );
+      }
+      setTemplates(loaded);
+      computeLabelStats(loaded);
     } catch {
       Alert.alert('Import failed', 'Clipboard did not contain valid JSON.');
     }
@@ -400,7 +459,9 @@ export default function GestureScreen() {
       return;
     }
     const seq = movingAverageFilter(rawSeq, 3);
+    const t0 = Date.now();
     const res = classifySequenceWithDetails(seq);
+    const latencyMs = Date.now() - t0;
     bufferRef.current = [];
     setCount(0);
     if (!res.label) {
@@ -413,8 +474,27 @@ export default function GestureScreen() {
       adaptiveThreshold = Math.max(0.3, stats.meanIntra * 1.5);
     const bestMin = res.details[res.label].min;
     const bestAvg = res.details[res.label].avg;
+    // Derive a softmax-style confidence distribution from DTW average distances.
+    const labelWeights: { label: string; weight: number }[] = [];
+    for (const label of Object.keys(res.details)) {
+      const avg = res.details[label].avg;
+      // Smaller distance => larger weight.
+      const weight = Math.exp(-avg);
+      labelWeights.push({ label, weight });
+    }
+    const totalWeight = labelWeights.reduce((sum, item) => sum + item.weight, 0) || 1;
+    const distribution = labelWeights
+      .map((item) => ({ label: item.label, prob: item.weight / totalWeight }))
+      .sort((a, b) => b.prob - a.prob);
+    const top = distribution[0];
+    const runnerUp = distribution[1];
     const msgLines = [
       `Label: ${res.label}`,
+      top ? `Confidence (DTW-based): ${(top.prob * 100).toFixed(1)}%` : '',
+      runnerUp
+        ? `Runner-up: ${runnerUp.label} (${(runnerUp.prob * 100).toFixed(1)}%)`
+        : '',
+      `Latency: ${latencyMs} ms`,
       `minDist: ${bestMin.toFixed(3)}`,
       `avgDist: ${bestAvg.toFixed(3)}`,
       `adaptiveTh: ${adaptiveThreshold.toFixed(3)}`,
