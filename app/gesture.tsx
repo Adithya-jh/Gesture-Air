@@ -206,7 +206,11 @@ export default function GestureScreen() {
   }
 
   function buildTemplatesFromMlDataset(raw: any): Templates {
-    if (!raw || !Array.isArray(raw.featureNames) || !Array.isArray(raw.entries)) {
+    if (
+      !raw ||
+      !Array.isArray(raw.featureNames) ||
+      !Array.isArray(raw.entries)
+    ) {
       throw new Error('JSON did not look like an ML dataset.');
     }
     const featureNames: string[] = raw.featureNames;
@@ -287,7 +291,11 @@ export default function GestureScreen() {
       const parsed = JSON.parse(text);
       let loaded: Templates;
       // If this looks like an ML dataset (from the ML tab), convert it.
-      if (parsed && Array.isArray((parsed as any).featureNames) && Array.isArray((parsed as any).entries)) {
+      if (
+        parsed &&
+        Array.isArray((parsed as any).featureNames) &&
+        Array.isArray((parsed as any).entries)
+      ) {
         loaded = buildTemplatesFromMlDataset(parsed);
         Alert.alert(
           'Imported ML dataset',
@@ -317,7 +325,11 @@ export default function GestureScreen() {
       }
       const parsed = JSON.parse(txt);
       let loaded: Templates;
-      if (parsed && Array.isArray((parsed as any).featureNames) && Array.isArray((parsed as any).entries)) {
+      if (
+        parsed &&
+        Array.isArray((parsed as any).featureNames) &&
+        Array.isArray((parsed as any).entries)
+      ) {
         loaded = buildTemplatesFromMlDataset(parsed);
         Alert.alert(
           'Imported ML dataset',
@@ -482,7 +494,8 @@ export default function GestureScreen() {
       const weight = Math.exp(-avg);
       labelWeights.push({ label, weight });
     }
-    const totalWeight = labelWeights.reduce((sum, item) => sum + item.weight, 0) || 1;
+    const totalWeight =
+      labelWeights.reduce((sum, item) => sum + item.weight, 0) || 1;
     const distribution = labelWeights
       .map((item) => ({ label: item.label, prob: item.weight / totalWeight }))
       .sort((a, b) => b.prob - a.prob);
